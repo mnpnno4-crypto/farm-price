@@ -1,0 +1,28 @@
+name: 農作物価格 毎日LINE通知
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 毎日 日本時間 08:00 (UTC 23:00)
+  workflow_dispatch:       # 手動実行も可能
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ライブラリインストール
+        run: |
+          pip install requests beautifulsoup4 playwright pdfplumber
+          playwright install chromium --with-deps
+
+      - name: 価格取得 & LINE送信
+        env:
+          LINE_CHANNEL_TOKEN: ${{ secrets.LINE_CHANNEL_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: python main.py
