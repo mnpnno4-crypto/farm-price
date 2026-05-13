@@ -55,6 +55,19 @@ def load_yesterday_prices():
         return {}
 
 
+def load_last_pdf_urls():
+    try:
+        with open('last_pdf_urls.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_last_pdf_urls(urls):
+    with open('last_pdf_urls.json', 'w', encoding='utf-8') as f:
+        json.dump(urls, f, ensure_ascii=False, indent=2)
+
+
 def check_price_changes(current, previous, threshold):
     alerts = []
     for item, price in current.items():
@@ -68,10 +81,18 @@ def check_price_changes(current, previous, threshold):
 
 def daily_report():
     config = load_config()
-    prices = get_market_prices()
-    yesterday = load_yesterday_prices()
+    prices, pdf_urls = get_market_prices()
+    last_pdf_urls = load_last_pdf_urls()
 
     date = datetime.now().strftime('%m月%d日')
+
+    if pdf_urls and pdf_urls == last_pdf_urls:
+        message = f"農作物価格レポート {date}\n市場データは未更新です（週次レポートの次回更新をお待ちください）"
+        print(message)
+        send_line_message(config['line_channel_token'], config['line_user_id'], message)
+        return
+
+    yesterday = load_yesterday_prices()
     message = f"農作物価格レポート {date}\n\n"
 
     if prices:
@@ -80,7 +101,9 @@ def daily_report():
     else:
         message += "本日の価格データを取得できませんでした。\n"
 
-    save_prices(prices)
+    if pdf_urls:
+        save_prices(prices)
+        save_last_pdf_urls(pdf_urls)
 
     alerts = check_price_changes(prices, yesterday, config['alert_threshold'])
     if alerts:

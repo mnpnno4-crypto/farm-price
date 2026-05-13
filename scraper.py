@@ -91,23 +91,29 @@ def get_tokyo_market_prices():
     }
 
     prices = {}
+    pdf_urls = {}
 
     yasai_url = get_latest_pdf_url(base_url, '/torihiki/week/yasai')
     if yasai_url:
         print(f"野菜PDF: {yasai_url}")
+        pdf_urls['yasai'] = yasai_url
         prices.update(parse_pdf_prices(yasai_url, veg_items))
 
     kajitsu_url = get_latest_pdf_url(base_url, '/torihiki/week/kajitsu')
     if kajitsu_url:
         print(f"果実PDF: {kajitsu_url}")
+        pdf_urls['kajitsu'] = kajitsu_url
         prices.update(parse_pdf_prices(kajitsu_url, fruit_items))
 
-    return prices
+    return prices, pdf_urls
 
 
 if __name__ == '__main__':
     print("市場価格を取得中...\n")
-    prices = get_tokyo_market_prices()
+    prices, pdf_urls = get_tokyo_market_prices()
     print(f"\n=== 取得した価格 ===")
     for k, v in prices.items():
         print(f"  {k}: {v}円")
+    print(f"\n=== 使用したPDF ===")
+    for k, v in pdf_urls.items():
+        print(f"  {k}: {v}")
