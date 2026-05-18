@@ -36,36 +36,44 @@ def send_line_message(token, user_id, message):
 
 
 def get_market_prices():
-    from scraper import get_tokyo_market_prices
-    return get_tokyo_market_prices()
+    from scraper import get_maff_daily_prices
+    raw, meta = get_maff_daily_prices()
+    # raw = {item: {'price': int, 'yoy': float|None}}
+    # prices_simple = {item: price} for backward compat
+    prices_simple = {item: d['price'] for item, d in raw.items()}
+    return prices_simple, raw, meta
 
 
-def save_prices(prices):
-    date = datetime.now().strftime('%Y-%m-%d')
-    with open(f'prices_{date}.json', 'w', encoding='utf-8') as f:
-        json.dump(prices, f, ensure_ascii=False, indent=2)
+def save_prices(prices_simple, prices_raw, data_date):
+    with open(f'prices_{data_date}.json', 'w', encoding='utf-8') as f:
+        json.dump(prices_simple, f, ensure_ascii=False, indent=2)
 
 
-def load_yesterday_prices():
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+def load_previous_prices(data_date):
+    """データ日付の前営業日の価格JSONを読む。なければ空dict。"""
+    from datetime import timedelta
+    dt = datetime.strptime(data_date, '%Y-%m-%d')
+    for i in range(1, 8):
+        prev = (dt - timedelta(days=i)).strftime('%Y-%m-%d')
+        try:
+            with open(f'prices_{prev}.json', 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            continue
+    return {}
+
+
+def load_last_data_date():
     try:
-        with open(f'prices_{yesterday}.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open('last_data_date.json', 'r', encoding='utf-8') as f:
+            return json.load(f).get('date')
     except FileNotFoundError:
-        return {}
+        return None
 
 
-def load_last_pdf_urls():
-    try:
-        with open('last_pdf_urls.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-
-def save_last_pdf_urls(urls):
-    with open('last_pdf_urls.json', 'w', encoding='utf-8') as f:
-        json.dump(urls, f, ensure_ascii=False, indent=2)
+def save_last_data_date(date_str):
+    with open('last_data_date.json', 'w', encoding='utf-8') as f:
+        json.dump({'date': date_str}, f)
 
 
 def check_price_changes(current, previous, threshold):
@@ -81,31 +89,39 @@ def check_price_changes(current, previous, threshold):
 
 def daily_report():
     config = load_config()
-    prices, pdf_urls = get_market_prices()
-    last_pdf_urls = load_last_pdf_urls()
+    prices_simple, prices_raw, meta = get_market_prices()
+    data_date = meta.get('date') if meta else None
 
-    date = datetime.now().strftime('%m月%d日')
+    today_str = datetime.now().strftime('%m月%d日')
 
-    if pdf_urls and pdf_urls == last_pdf_urls:
-        message = f"農作物価格レポート {date}\n市場データは未更新です（週次レポートの次回更新をお待ちください）"
+    if not data_date:
+        message = f"農作物価格レポート {today_str}\nデータ取得に失敗しました。"
         print(message)
         send_line_message(config['line_channel_token'], config['line_user_id'], message)
         return
 
-    yesterday = load_yesterday_prices()
-    message = f"農作物価格レポート {date}\n\n"
+    last_date = load_last_data_date()
+    if data_date == last_date:
+        message = f"農作物価格レポート {today_str}\n市場データは未更新です（最新: {data_date}）"
+        print(message)
+        send_line_message(config['line_channel_token'], config['line_user_id'], message)
+        return
 
-    if prices:
-        for item, price in prices.items():
-            message += f"・{item}: {price}円/kg\n"
+    previous = load_previous_prices(data_date)
+    date_label = datetime.strptime(data_date, '%Y-%m-%d').strftime('%m月%d日')
+    message = f"農作物価格レポート（{date_label}）\n\n"
+
+    if prices_raw:
+        for item, d in sorted(prices_raw.items()):
+            yoy = f" 前日比{d['yoy']:.1f}%" if d['yoy'] else ''
+            message += f"・{item}: {d['price']}円/kg{yoy}\n"
     else:
         message += "本日の価格データを取得できませんでした。\n"
 
-    if pdf_urls:
-        save_prices(prices)
-        save_last_pdf_urls(pdf_urls)
+    save_prices(prices_simple, prices_raw, data_date)
+    save_last_data_date(data_date)
 
-    alerts = check_price_changes(prices, yesterday, config['alert_threshold'])
+    alerts = check_price_changes(prices_simple, previous, config['alert_threshold'])
     if alerts:
         message += f"\n価格変動アラート({config['alert_threshold']}%以上):\n"
         for alert in alerts:

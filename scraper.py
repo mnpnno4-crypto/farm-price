@@ -3,6 +3,9 @@ import pdfplumber
 import requests
 import re
 import io
+import csv
+import tempfile
+import os
 from datetime import datetime
 
 
@@ -108,11 +111,98 @@ def get_tokyo_market_prices():
     return prices, pdf_urls
 
 
+def get_maff_daily_prices():
+    """農水省 日次価格データを取得 → {品目名: {'price': 円/kg, 'yoy': 対前日比%}}"""
+    target_items = {
+        'だいこん', 'にんじん', 'キャベツ', 'はくさい', 'ほうれんそう',
+        'ねぎ', 'ブロッコリー', 'レタス', 'きゅうり', 'なす',
+        'トマト', 'ミニトマト', 'ピーマン', 'ばれいしょ', 'たまねぎ',
+    }
+    base_url = 'https://www.seisen.maff.go.jp'
+    index_url = f'{base_url}/seisen/bs04b040md001/BS04B040UC020SC998-Evt001.do'
+
+    prices = {}
+    data_date = None
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            page.goto(index_url, timeout=30000)
+            page.wait_for_load_state('networkidle', timeout=20000)
+
+            # 最新日付のリンクをクリック（最初の s00XX フォーム）
+            date_links = page.query_selector_all('a[href^="javascript:document.getElementById(\'s0"]')
+            if not date_links:
+                print("日付リンクが見つかりませんでした")
+                return {}, {}
+            with page.expect_navigation(timeout=15000):
+                date_links[0].click()
+            page.wait_for_load_state('networkidle', timeout=20000)
+
+            # 全市場合計 の CSV（最初の CSV リンク）をダウンロード
+            csv_links = page.query_selector_all('a:has-text("CSV")')
+            if not csv_links:
+                print("CSVリンクが見つかりませんでした")
+                return {}, {}
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
+            tmp.close()
+            with page.expect_download(timeout=20000) as dl:
+                csv_links[0].click()
+            dl.value.save_as(tmp.name)
+
+        finally:
+            browser.close()
+
+    # CSV を shift-jis でパース
+    try:
+        with open(tmp.name, 'rb') as f:
+            raw = f.read()
+        text = raw.decode('shift-jis')
+        reader = csv.reader(text.splitlines())
+        header = next(reader)  # 年,月,日,曜日,品目名,品目コード,産地名,産地コード,数量,価格,...
+
+        for row in reader:
+            if len(row) < 10:
+                continue
+            year, month, day = row[0], row[1], row[2]
+            item_name = row[4].strip()
+            area_name = row[6].strip()  # 空 = 全市場集計行
+            price_str = row[9].strip()
+            yoy_str = row[11].strip() if len(row) > 11 else ''
+
+            # 集計行のみ（産地名が空）かつ対象品目
+            if area_name == '' and item_name in target_items and price_str:
+                try:
+                    data_date = f"{year}-{int(month):02d}-{int(day):02d}"
+                    prices[item_name] = {
+                        'price': int(price_str),
+                        'yoy': float(yoy_str) if yoy_str else None,
+                    }
+                except (ValueError, TypeError):
+                    pass
+    finally:
+        os.unlink(tmp.name)
+
+    print(f"農水省日次データ取得完了: {data_date}, {len(prices)}品目")
+    return prices, {'date': data_date} if data_date else {}
+
+
 if __name__ == '__main__':
-    print("市場価格を取得中...\n")
-    prices, pdf_urls = get_tokyo_market_prices()
+    print("=== 農水省 日次価格データ取得テスト ===\n")
+    prices, meta = get_maff_daily_prices()
+    print(f"\nデータ日付: {meta.get('date')}")
+    print(f"\n{'品目':<15} {'価格(円/kg)':>10} {'対前日比':>8}")
+    print('-' * 38)
+    for item, data in sorted(prices.items()):
+        yoy = f"{data['yoy']:.1f}%" if data['yoy'] else '-'
+        print(f"{item:<15} {data['price']:>10} {yoy:>8}")
+
+    print("\n=== 旧方式（週次PDF）テスト ===\n")
+    prices2, pdf_urls = get_tokyo_market_prices()
     print(f"\n=== 取得した価格 ===")
-    for k, v in prices.items():
+    for k, v in prices2.items():
         print(f"  {k}: {v}円")
     print(f"\n=== 使用したPDF ===")
     for k, v in pdf_urls.items():
