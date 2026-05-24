@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>農場価格ダッシュボード</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; }
+    .bar-wrap { display: flex; align-items: flex-end; gap: 2px; height: 28px; }
+    .bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-900">
+
+  <!-- ヘッダー -->
+  <header class="bg-green-700 text-white px-4 pt-safe-top sticky top-0 z-20 shadow-md">
+    <div class="flex items-center justify-between py-3 max-w-lg mx-auto">
+      <div>
+        <div class="text-lg font-bold leading-tight">🌱 農場価格ダッシュボード</div>
+        {% if not no_data %}
+        <div class="text-green-200 text-xs mt-0.5">{{ updated }} 公表データ</div>
+        {% endif %}
+      </div>
+      <button onclick="location.reload()"
+              class="bg-green-600 hover:bg-green-500 active:bg-green-800
+                     text-white text-sm px-3 py-1.5 rounded-lg font-medium transition-colors">
+        更新
+      </button>
+    </div>
+  </header>
+
+  {% if no_data %}
+  <div class="flex flex-col items-center justify-center h-64 text-gray-400 px-6 text-center">
+    <div class="text-4xl mb-3">📭</div>
+    <div class="font-medium">データがまだありません</div>
+    <div class="text-sm mt-1">GitHub Actions が翌営業日 15 時以降に取得します</div>
+  </div>
+
+  {% else %}
+  <main class="max-w-lg mx-auto px-3 py-4 space-y-3 pb-8">
+
+    {% for item in items %}
+    <article class="bg-white rounded-2xl shadow-sm overflow-hidden
+                    {% if item.highlight %}ring-2 ring-green-400{% else %}border border-gray-100{% endif %}">
+
+      <!-- ハイライトラベル -->
+      {% if item.highlight %}
+      <div class="bg-green-50 border-b border-green-100 px-4 py-1.5 flex items-center gap-1.5">
+        <span class="text-green-600 text-xs font-semibold">📍 洞戸農場 栽培品目</span>
+      </div>
+      {% endif %}
+
+      <div class="px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+
+          <!-- 左: 品目名 + 価格 -->
+          <div class="flex-1 min-w-0">
+            <div class="font-bold text-lg leading-tight
+                        {% if item.highlight %}text-green-700{% else %}text-gray-800{% endif %}">
+              {{ item.name }}
+            </div>
+            <div class="mt-1 flex items-baseline gap-1">
+              <span class="text-3xl font-extrabold tracking-tight text-gray-900">
+                ¥{{ "{:,}".format(item.price) }}
+              </span>
+              <span class="text-sm text-gray-400 font-normal">/kg</span>
+            </div>
+            {% if item.prev_price %}
+            <div class="text-xs text-gray-400 mt-0.5">
+              前日 ¥{{ "{:,}".format(item.prev_price) }}
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- 右: 前日比 -->
+          {% if item.change is not none %}
+          <div class="text-right flex-shrink-0 pt-1">
+            {% if item.change > 5 %}
+              <div class="text-2xl font-extrabold text-red-500">▲{{ "%.1f"|format(item.change) }}%</div>
+              <div class="text-xs text-red-400 mt-0.5 font-medium">値上がり</div>
+            {% elif item.change < -5 %}
+              <div class="text-2xl font-extrabold text-blue-500">▼{{ "%.1f"|format(item.change|abs) }}%</div>
+              <div class="text-xs text-blue-400 mt-0.5 font-medium">値下がり</div>
+            {% else %}
+              <div class="text-xl font-bold text-gray-400">
+                {% if item.change >= 0 %}+{% endif %}{{ "%.1f"|format(item.change) }}%
+              </div>
+              <div class="text-xs text-gray-400 mt-0.5">横ばい</div>
+            {% endif %}
+          </div>
+          {% endif %}
+
+        </div>
+
+        <!-- トレンドバー -->
+        {% if item.bars|length >= 2 %}
+        <div class="mt-3">
+          <div class="bar-wrap">
+            {% for t in item.trend %}
+            <div class="bar
+                        {% if item.highlight %}bg-green-300{% else %}bg-gray-200{% endif %}"
+                 style="height: {{ item.bars[loop.index0] }}%"
+                 title="{{ t.date }}: ¥{{ '{:,}'.format(t.price) }}"></div>
+            {% endfor %}
+          </div>
+          <div class="flex justify-between text-gray-400 mt-0.5" style="font-size: 9px;">
+            <span>{{ item.trend[0].date[5:] }}</span>
+            <span class="text-gray-300">{{ item.trend|length }}日間</span>
+            <span>{{ item.trend[-1].date[5:] }}</span>
+          </div>
+        </div>
+        {% endif %}
+
+      </div>
+    </article>
+    {% endfor %}
+
+  </main>
+
+  <footer class="text-center text-xs text-gray-400 pb-8">
+    農水省 青果物卸売市場調査（日別） — 翌営業日 15 時公表
+  </footer>
+  {% endif %}
+
+</body>
+</html>

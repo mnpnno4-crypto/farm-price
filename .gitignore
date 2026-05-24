@@ -5,3 +5,4 @@ prices_*.json
 *.pdf
 *.txt
 *.html
+!dashboard/templates/*.html
