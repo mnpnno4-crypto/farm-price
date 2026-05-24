@@ -125,22 +125,47 @@ def get_maff_daily_prices():
     data_date = None
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+            ],
+        )
+        context = browser.new_context(
+            user_agent=(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/124.0.0.0 Safari/537.36'
+            ),
+            locale='ja-JP',
+        )
+        page = context.new_page()
         try:
             page.goto(index_url, timeout=30000)
             page.wait_for_load_state('networkidle', timeout=20000)
 
-            # 最新日付のリンクをクリック（最初の s00XX フォーム）
-            date_links = page.query_selector_all('a[href^="javascript:document.getElementById(\'s0"]')
+            # 最新日付のリンクをクリック（getElementById を含む JS リンク）
+            date_links = page.query_selector_all('a[href*="getElementById"]')
             if not date_links:
-                print("日付リンクが見つかりませんでした")
+                date_links = page.query_selector_all('a[href^="javascript:"]')
+            if not date_links:
+                content = page.content()
+                print(f"日付リンクが見つかりませんでした。ページ内容(先頭500文字):\n{content[:500]}")
                 return {}, {}
-            with page.expect_navigation(timeout=15000):
-                date_links[0].click()
-            page.wait_for_load_state('networkidle', timeout=20000)
 
-            # 全市場合計 の CSV（最初の CSV リンク）をダウンロード
+            print(f"日付リンク {len(date_links)}個 発見: {date_links[0].get_attribute('href')}")
+            date_links[0].click()
+
+            # CSV リンクが現れるまで待つ（navigation イベント非依存）
+            try:
+                page.wait_for_selector('a:has-text("CSV")', timeout=20000)
+            except Exception as e:
+                print(f"CSVリンク待機タイムアウト: {e}")
+                return {}, {}
+
             csv_links = page.query_selector_all('a:has-text("CSV")')
             if not csv_links:
                 print("CSVリンクが見つかりませんでした")
