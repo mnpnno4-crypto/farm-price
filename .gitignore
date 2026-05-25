@@ -6,3 +6,4 @@ prices_*.json
 *.txt
 *.html
 !dashboard/templates/*.html
+
